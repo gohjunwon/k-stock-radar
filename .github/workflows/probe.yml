@@ -1,0 +1,32 @@
+name: probe
+on:
+  push:
+    branches: [probe]
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    steps:
+      - run: pip install requests beautifulsoup4 -q
+      - shell: python
+        run: |
+          import requests, re
+          from bs4 import BeautifulSoup
+          H={'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36'}
+          r=requests.get('https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13',headers=H,timeout=30)
+          print('KIND',r.status_code,len(r.content), r.headers.get('content-type'))
+          t=r.content.decode('cp949','replace'); s=BeautifulSoup(t,'html.parser'); rows=s.find_all('tr'); print('rows',len(rows))
+          for tr in rows[:3]: print([c.get_text(strip=True) for c in tr.find_all(['th','td'])])
+          r=requests.get('https://finance.naver.com/item/main.naver?code=005930',headers=H,timeout=30)
+          print('NF',r.status_code,len(r.content),r.headers.get('content-type'))
+          t=r.content.decode('cp949','replace'); s=BeautifulSoup(t,'html.parser')
+          d=s.select_one('div.cop_analysis'); print('cop', bool(d))
+          if d:
+            for tr in d.select('thead tr'): print('TH',[c.get_text(' ',strip=True) for c in tr.find_all('th')])
+            for tr in d.select('tbody tr')[:8]: print('TR',[c.get_text(strip=True) for c in tr.find_all(['th','td'])])
+          print('price', s.select_one('p.no_today').get_text(' ',strip=True) if s.select_one('p.no_today') else None)
+          print('sector', [a.get_text(strip=True) for a in s.select('div.trade_compare h4 em a')][:3])
+          for u in ['https://www.hankyung.com/feed/finance','https://www.mk.co.kr/rss/50200011/','https://www.yna.co.kr/rss/economy.xml','https://rss.etnews.com/Section902.xml','https://www.edaily.co.kr/rss/stock.xml','https://news.google.com/rss/search?q=%EA%B3%B5%EA%B8%89%EA%B3%84%EC%95%BD+when:1d&hl=ko&gl=KR&ceid=KR:ko']:
+            try:
+              r=requests.get(u,headers=H,timeout=20); print('RSS',u,r.status_code,len(r.content)); print(r.text[:600].replace('\n',' '))
+            except Exception as e: print('RSS ERR',u,e)
+          r=requests.get('https://openapi.naver.com/v1/search/news.json?query=test',headers=H,timeout=20); print('NAVERAPI',r.status_code,r.text[:200])
