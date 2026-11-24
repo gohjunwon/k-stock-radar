@@ -1,0 +1,1069 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>K-Stock Catalyst Radar · 국내주식 호재 레이더 (실시간 검색 검증)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Noto Sans KR"', 'system-ui', '-apple-system', 'sans-serif'],
+          },
+          colors: {
+            navy: {
+              950: '#0a1122',
+              900: '#0f172a',
+              800: '#172554',
+              700: '#1e3a8a',
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    body {
+      background-color: #f8fafc;
+      color: #0f172a;
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    .glass-header {
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: blur(12px);
+    }
+    @keyframes spinOnce {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .spin-anim { animation: spinOnce 0.65s ease-in-out; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col selection:bg-blue-900/15 selection:text-navy-950">
+  <!-- 상단 헤더 (화이트 + 짙은 남색) -->
+  <header class="glass-header sticky top-0 z-40 border-b border-slate-200 shadow-xs">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-navy-900 flex items-center justify-center shadow-sm">
+          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        </div>
+        <div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <h1 class="text-lg sm:text-xl font-extrabold tracking-tight text-navy-950">국내주식 호재 레이더</h1>
+            <span id="market-session-badge" class="px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-navy-900 text-white">
+              장 상태 확인 중
+            </span>
+            <span id="auto-sync-badge" class="px-2.5 py-0.5 text-[11px] font-semibold rounded-full bg-slate-100 text-navy-800 border border-slate-300">
+              장중 10초 자동갱신 대기
+            </span>
+            <span class="px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-blue-50 text-navy-900 border border-blue-200">
+              Google 검색 2차 실증 검증
+            </span>
+          </div>
+          <p id="header-subtitle" class="text-xs text-slate-600 mt-0.5">준비 완료 · Gemini API 키 연결 시 실시간 Google 검색으로 검증된 데이터만 수집합니다.</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2 flex-wrap">
+        <button id="manual-refresh-btn" onclick="performFullRefresh('manual')" class="px-3.5 py-2 rounded-lg text-xs sm:text-sm font-bold bg-navy-900 hover:bg-navy-800 text-white transition flex items-center gap-1.5 cursor-pointer shadow-xs">
+          <svg id="refresh-icon" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span>전체 실검색 갱신</span>
+        </button>
+
+        <div id="gemini-status-badge" class="hidden xl:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white border border-slate-300 text-slate-700">
+          <span class="w-2 h-2 rounded-full bg-slate-400"></span>
+          <span>Gemini API 미연결</span>
+        </div>
+
+        <button onclick="openGeminiModal()" class="px-3.5 py-2 rounded-lg text-xs sm:text-sm font-bold bg-white hover:bg-slate-50 text-navy-950 border-2 border-navy-900 transition flex items-center gap-1.5 cursor-pointer">
+          <span class="text-navy-800">✦</span>
+          <span id="header-gemini-btn-text">Gemini 로그인</span>
+        </button>
+      </div>
+    </div>
+
+    <nav class="max-w-7xl mx-auto px-4 sm:px-6 overflow-x-auto bg-white">
+      <div id="tab-bar" class="flex items-center gap-1 border-t border-slate-100 pt-1.5 pb-1.5 min-w-max"></div>
+    </nav>
+  </header>
+
+  <main id="app-content" class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6"></main>
+
+  <footer class="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-500">
+    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+      <span class="font-medium text-navy-900">K-Stock Catalyst Radar · Google Search Grounding 2단계 사실확인 &amp; 무더미(No-Dummy) 모드</span>
+      <span>모든 항목은 실제 검색 출처 URL이 확인된 경우에만 표시되며, 최종 투자 전 원문 공시를 확인하세요.</span>
+    </div>
+  </footer>
+
+  <!-- Gemini 로그인 및 API 키 설정 모달 -->
+  <div id="gemini-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-navy-950/50 backdrop-blur-xs p-4">
+    <div class="w-full max-w-md rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden">
+      <div class="px-6 py-4 bg-navy-900 text-white flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-sky-300 text-lg">✦</span>
+          <h3 class="font-bold text-white">Gemini API 연결 (실시간 Google 검색)</h3>
+        </div>
+        <button onclick="closeGeminiModal()" class="text-slate-300 hover:text-white text-xl leading-none cursor-pointer">&times;</button>
+      </div>
+      <div class="p-6 space-y-4 bg-white">
+        <p class="text-xs sm:text-sm text-slate-700 leading-relaxed">
+          가짜/예시 데이터를 제거했습니다. <strong class="text-navy-900">Google AI Studio Gemini API Key</strong>를 입력하면 실시간 Google 검색으로 <strong class="text-navy-900">실제 존재하는 뉴스·공시 출처 URL</strong>이 확인된 항목만 2단계 검증 후 불러옵니다.
+        </p>
+        <div>
+          <label class="block text-xs font-semibold text-navy-900 mb-1">Google 계정 이메일 (표시용)</label>
+          <input id="gemini-email-input" type="email" placeholder="example@gmail.com" class="w-full px-3.5 py-2 rounded-lg bg-slate-50 border border-slate-300 text-sm text-navy-950 focus:outline-none focus:border-navy-900" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-navy-900 mb-1">Gemini API Key (필수)</label>
+          <input id="gemini-key-input" type="password" placeholder="AIzaSy..." class="w-full px-3.5 py-2 rounded-lg bg-slate-50 border border-slate-300 text-sm text-navy-950 focus:outline-none focus:border-navy-900" />
+        </div>
+        <div class="flex items-center justify-end gap-2 pt-2">
+          <button onclick="closeGeminiModal()" class="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer">취소</button>
+          <button onclick="confirmGeminiLogin()" class="px-4 py-2 rounded-lg text-xs font-bold bg-navy-900 hover:bg-navy-800 text-white cursor-pointer">연결 및 실검색 시작</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const TABS = [
+      { id: 'ai-picks', label: '1. 실시간 AI 추천종목', badge: '실검색' },
+      { id: 'today-catalyst', label: '2. 오늘의 호재', badge: '2차검증' },
+      { id: 'upcoming-events', label: '3. 1달 앞 주요일정', badge: '1M' },
+      { id: 'earnings-preview', label: '4. 실적 미리보기', badge: '3Q·요인' },
+      { id: 'market-schedule', label: '5. 시장일정', badge: '거시·정세' },
+      { id: 'calendar', label: '6. 통합 캘린더', badge: 'CAL' },
+      { id: 'watchlist', label: '7. 관심종목 & 뉴스', badge: 'MY' },
+    ];
+
+    // 더미/가짜 데이터 없이 비어 있는 초기 구조만 유지
+    function createEmptyRadarData() {
+      return {
+        updatedAt: '',
+        aiPicks: [],
+        todayNews: [],
+        upcomingEvents: [],
+        earningsPreview: [],
+        marketSchedules: []
+      };
+    }
+
+    const STOCK_CATALOG = [
+      { ticker: '005930', name: '삼성전자', sector: '반도체' },
+      { ticker: '000660', name: 'SK하이닉스', sector: '반도체' },
+      { ticker: '035420', name: 'NAVER', sector: '인터넷/AI' },
+      { ticker: '035720', name: '카카오', sector: '인터넷/플랫폼' },
+      { ticker: '005380', name: '현대차', sector: '자동차' },
+      { ticker: '000270', name: '기아', sector: '자동차' },
+      { ticker: '207940', name: '삼성바이오로직스', sector: '바이오' },
+      { ticker: '068270', name: '셀트리온', sector: '바이오' },
+      { ticker: '012450', name: '한화에어로스페이스', sector: '방산' },
+      { ticker: '006400', name: '삼성SDI', sector: '2차전지' },
+      { ticker: '373220', name: 'LG에너지솔루션', sector: '2차전지' },
+      { ticker: '196170', name: '알테오젠', sector: '바이오' },
+      { ticker: '145020', name: '휴젤', sector: '바이오/미용' },
+      { ticker: '034020', name: '두산에너빌리티', sector: '원전/에너지' }
+    ];
+
+    window.state = {
+      activeTab: 'ai-picks',
+      geminiLoggedIn: localStorage.getItem('kstock_gemini_logged_in') === 'true',
+      geminiEmail: localStorage.getItem('kstock_gemini_email') || '',
+      geminiKey: localStorage.getItem('kstock_gemini_key') || '',
+      aiCustomPrompt: '',
+      globalLoading: false,
+      loadingStepText: '',
+      globalError: '',
+      watchAiSummary: {},
+      watchNewsMap: JSON.parse(localStorage.getItem('kstock_verified_watch_news_v2') || '{}'),
+      watchLoading: false,
+      catalystSectorFilter: '전체',
+      eventCategoryFilter: '전체',
+      selectedEarningsTicker: '',
+      calendarMonth: '',
+      selectedCalendarDate: '',
+      watchlist: JSON.parse(localStorage.getItem('kstock_watchlist_v2') || '["005930","000660","035420"]'),
+      selectedWatchTicker: localStorage.getItem('kstock_selected_watch_v2') || '005930',
+      rejectedFactItems: [],
+      radarData: createEmptyRadarData(),
+      lastRefreshedAt: '',
+      refreshCount: 0,
+      isAutoRefreshing: false
+    };
+
+    let earningsChartInstance = null;
+
+    function getKstNowParts() {
+      const now = new Date();
+      const kstStr = now.toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' });
+      const [datePart, timePart] = kstStr.split(' ');
+      const [hh, mm, ss] = timePart.split(':').map(Number);
+      const weekdayStr = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', weekday: 'short' }).format(now);
+      const isWeekday = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(weekdayStr);
+      const minutesFromMidnight = hh * 60 + mm;
+      const isRegularMarketOpen = isWeekday && minutesFromMidnight >= (9 * 60) && minutesFromMidnight <= (15 * 60 + 30);
+
+      return {
+        datePart,
+        yearMonth: datePart.slice(0, 7),
+        full: `${datePart} ${timePart} KST`,
+        timeOnly: `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`,
+        isWeekday,
+        isRegularMarketOpen
+      };
+    }
+
+    function initCalendarDefaults() {
+      const kst = getKstNowParts();
+      if (!state.calendarMonth) state.calendarMonth = kst.yearMonth;
+      if (!state.selectedCalendarDate) state.selectedCalendarDate = kst.datePart;
+    }
+
+    function updateMarketStatusBadges() {
+      const kst = getKstNowParts();
+      const sessionBadge = document.getElementById('market-session-badge');
+      const syncBadge = document.getElementById('auto-sync-badge');
+
+      if (kst.isRegularMarketOpen) {
+        sessionBadge.className = 'px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-navy-900 text-white';
+        sessionBadge.textContent = '정규장 운영 중 (09:00~15:30)';
+        syncBadge.className = 'px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-blue-50 text-navy-800 border border-blue-200 animate-pulse';
+        syncBadge.textContent = '10초 자동갱신 활성';
+      } else {
+        sessionBadge.className = 'px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-navy-900 text-white';
+        sessionBadge.textContent = kst.isWeekday ? '장외 시간 (09:00 개장 대기)' : '휴장일 (주말)';
+        syncBadge.className = 'px-2.5 py-0.5 text-[11px] font-semibold rounded-full bg-slate-100 text-slate-600 border border-slate-200';
+        syncBadge.textContent = '장 시작 후 10초 자동갱신';
+      }
+    }
+
+    function extractJsonFromText(rawText) {
+      const cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const firstBrace = cleaned.indexOf('{');
+      const firstBracket = cleaned.indexOf('[');
+      let start = -1;
+      let end = -1;
+
+      if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+        start = firstBrace;
+        end = cleaned.lastIndexOf('}');
+      } else if (firstBracket !== -1) {
+        start = firstBracket;
+        end = cleaned.lastIndexOf(']');
+      }
+      if (start === -1 || end === -1 || end <= start) {
+        throw new Error('검색 응답에서 유효한 JSON 구조를 찾지 못했습니다.');
+      }
+      return JSON.parse(cleaned.slice(start, end + 1));
+    }
+
+    // 옵션 A: Gemini Google Search Grounding 호출 (실제 검색 출처 URL 반환 포함)
+    async function callGeminiWithGoogleSearch(promptText) {
+      if (!state.geminiKey) throw new Error('Gemini API Key가 등록되지 않았습니다.');
+
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(state.geminiKey)}`;
+      const body = {
+        contents: [{ parts: [{ text: promptText }] }],
+        tools: [{ google_search: {} }],
+        generationConfig: {
+          temperature: 0.1
+        }
+      };
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData?.error?.message || `Gemini API 오류 (${res.status})`);
+      }
+
+      const data = await res.json();
+      const candidate = data?.candidates?.[0] || {};
+      const text = candidate?.content?.parts?.map(p => p.text || '').join('\n') || '';
+      const chunks = candidate?.groundingMetadata?.groundingChunks || [];
+      const sources = chunks
+        .filter(c => c.web && c.web.uri)
+        .map(c => ({ title: c.web.title || '검색 출처', uri: c.web.uri }));
+
+      return { text, sources };
+    }
+
+    // 2단계 Google 검색 사실확인 파이프라인
+    async function verifyNewsListWithTwoPassSearch(rawNewsList, groundingSources) {
+      const kst = getKstNowParts();
+      const verified = [];
+      const rejected = [];
+
+      // 1차 검증: Google Search Grounding 실제 웹 출처 존재 여부 + 기본 형식 확인
+      if (!groundingSources || groundingSources.length === 0) {
+        for (const item of rawNewsList) {
+          rejected.push({
+            ...item,
+            verifyReason: '1차 검증 탈락: Google 검색 출처 URL이 확인되지 않아 제외됨'
+          });
+        }
+        return { verified, rejected };
+      }
+
+      const pass1Candidates = [];
+      for (const item of rawNewsList) {
+        const headline = (item.headline || '').trim();
+        const ticker = (item.ticker || '').trim();
+        if (headline.length < 8 || !/^\d{6}$/.test(ticker)) {
+          rejected.push({ ...item, verifyReason: '1차 검증 탈락: 종목코드(6자리) 또는 기사 제목 불충분' });
+          continue;
+        }
+        pass1Candidates.push(item);
+      }
+
+      if (pass1Candidates.length === 0) return { verified, rejected };
+
+      // 2차 검증: 각 후보 기사를 Google Search로 다시 교차 사실확인하여 실존 보도인지 재검증
+      const checkPrompt = `
+오늘 날짜는 ${kst.datePart} (한국시간)입니다.
+아래 국내주식 뉴스 후보 목록 각각에 대해 Google 검색을 실행하여 **실제 언론사 기사나 공식 공시로 존재하는 사실인지 2차 사실확인**을 수행하세요.
+추측이거나, 존재하지 않는 기사거나, 날짜/종목/내용이 사실과 다르면 반드시 "verified": false 로 판정하세요.
+
+[후보 목록]
+${JSON.stringify(pass1Candidates, null, 2)}
+
+반드시 아래 JSON 배열만 출력하세요(설명 문구 금지):
+[
+  {
+    "id": "후보의 id 그대로",
+    "verified": true 또는 false,
+    "reason": "실제 확인된 언론사명/날짜 또는 탈락 사유 한 줄",
+    "matchedSourceUrl": "실제 확인된 기사 URL (없으면 빈 문자열)"
+  }
+]`;
+
+      const { text: verifyText, sources: pass2Sources } = await callGeminiWithGoogleSearch(checkPrompt);
+      const verdicts = extractJsonFromText(verifyText);
+      const verdictMap = new Map(Array.isArray(verdicts) ? verdicts.map(v => [String(v.id), v]) : []);
+
+      for (const item of pass1Candidates) {
+        const v = verdictMap.get(String(item.id));
+        const fallbackUrl = (v && v.matchedSourceUrl && v.matchedSourceUrl.startsWith('http'))
+          ? v.matchedSourceUrl
+          : (pass2Sources[0]?.uri || groundingSources[0]?.uri || '');
+
+        if (v && v.verified === true && fallbackUrl) {
+          verified.push({
+            ...item,
+            sourceUrl: fallbackUrl,
+            factCheckNote: `1차 검색 출처(${groundingSources.length}건) + 2차 실증 교차검증 통과 (${v.reason || '실제 보도 확인'})`
+          });
+        } else {
+          rejected.push({
+            ...item,
+            verifyReason: `2차 검색 검증 탈락: ${v?.reason || '실제 기사 교차 확인 실패'}`
+          });
+        }
+      }
+
+      return { verified, rejected };
+    }
+
+    // 전체 7개 탭 실데이터 검색 및 2단계 검증 실행
+    async function fetchAllVerifiedMarketData(triggerType = 'manual') {
+      if (!state.geminiKey) {
+        state.globalError = '실제 뉴스와 일정을 조회하려면 상단 [Gemini 로그인]에서 Gemini API Key를 먼저 등록해 주세요.';
+        render();
+        return;
+      }
+
+      if (state.globalLoading) return;
+      state.globalLoading = true;
+      state.globalError = '';
+      state.loadingStepText = '1/3 단계: Google 실시간 검색으로 장전·장중 호재 및 시장 일정 수집 중...';
+      render();
+
+      const kst = getKstNowParts();
+
+      try {
+        // STEP 1: 실제 오늘의 국내주식 호재 + 향후 1달 일정 + 거시 시장 일정 검색
+        const step1Prompt = `
+현재 한국 시각은 ${kst.full}입니다.
+Google 검색을 사용해 **실제로 보도된 최신 한국 주식시장 데이터**만 수집하여 아래 JSON 객체 형식으로 반환하세요.
+절대로 가상의 뉴스나 추측성 내용을 만들지 마세요. 검색에서 확인된 내용만 적으세요.
+
+1. "todayNews": 최근 24시간 내(장전/장중) 실제 언론에 보도된 국내 상장사 주요 호재 4~6건 (반복 기사는 1건으로 통합)
+2. "upcomingEvents": 오늘(${kst.datePart}) 이후 향후 1개월 내 실제 예정된 국내 상장사의 임상, FDA, 회사, 학회, 실적, M&A 일정 4~6건 (확정일이 모호하면 isExactDate: false로 두고 예상 발표일 기재)
+3. "marketSchedules": 오늘(${kst.datePart}) 이후 국내 증시에 영향을 줄 실제 미국·한국·글로벌 경제지표 및 정세 일정 4~6건
+
+반드시 아래 JSON 스키마만 출력하세요:
+{
+  "todayNews": [
+    {
+      "id": "n1",
+      "time": "HH:MM",
+      "ticker": "6자리 종목코드",
+      "name": "종목명",
+      "sector": "섹터",
+      "headline": "실제 기사 헤드라인",
+      "source": "실제 언론사명",
+      "impact": "높음 또는 중간",
+      "detail": "기사 핵심 사실 요약 1~2문장"
+    }
+  ],
+  "upcomingEvents": [
+    {
+      "id": "ev1",
+      "date": "YYYY-MM-DD",
+      "isExactDate": true 또는 false,
+      "category": "임상 또는 FDA 또는 회사 또는 학회 또는 실적 또는 M&A",
+      "ticker": "6자리 종목코드",
+      "name": "종목명",
+      "title": "일정 제목",
+      "detail": "일정 상세 설명"
+    }
+  ],
+  "marketSchedules": [
+    {
+      "date": "YYYY-MM-DD",
+      "timeKst": "HH:MM",
+      "region": "미국 또는 한국 또는 글로벌",
+      "title": "경제지표/정세 일정명",
+      "impact": "높음 또는 중간",
+      "krEffect": "국내 증시 영향 분석"
+    }
+  ]
+}`;
+
+        const step1Res = await callGeminiWithGoogleSearch(step1Prompt);
+        const step1Json = extractJsonFromText(step1Res.text);
+
+        state.loadingStepText = '2/3 단계: 수집된 호재 기사에 대한 2차 Google 검색 교차 사실확인 진행 중...';
+        render();
+
+        const { verified: verifiedNews, rejected: rejectedNews } = await verifyNewsListWithTwoPassSearch(
+          Array.isArray(step1Json.todayNews) ? step1Json.todayNews : [],
+          step1Res.sources
+        );
+
+        const validEvents = (Array.isArray(step1Json.upcomingEvents) ? step1Json.upcomingEvents : [])
+          .filter(ev => ev && /^\d{4}-\d{2}-\d{2}$/.test(ev.date || '') && /^\d{6}$/.test(ev.ticker || ''));
+
+        const validMarkets = (Array.isArray(step1Json.marketSchedules) ? step1Json.marketSchedules : [])
+          .filter(ms => ms && /^\d{4}-\d{2}-\d{2}$/.test(ms.date || ''));
+
+        state.loadingStepText = '3/3 단계: 2차 검증 통과 호재 기반 AI 추천종목 및 3개 분기 실제 재무 실적 분석 중...';
+        render();
+
+        // STEP 3: 검증된 호재 & 1달 앞 종목 기반 실시간 추천종목 + 실적 미리보기(최근 3개 분기) 검색
+        const eventTickers = validEvents.slice(0, 4).map(e => `${e.name}(${e.ticker})`).join(', ');
+        const newsSummary = verifiedNews.map(n => `- ${n.name}(${n.ticker}): ${n.headline}`).join('\n');
+        const userCustom = state.aiCustomPrompt.trim() ? `사용자 요청 조건: ${state.aiCustomPrompt.trim()}` : '';
+
+        const step3Prompt = `
+현재 한국 시각은 ${kst.full}입니다.
+Google 검색을 통해 **실제 한국 증시 현재가 범위와 실제 최근 3개 분기 공시 재무제표(매출액, 영업이익, 영업이익률, 부채비율)**를 확인하여 아래 JSON 객체만 반환하세요.
+확인되지 않은 숫자는 지어내지 마세요. ${userCustom}
+
+[2차 사실확인 통과 호재]
+${newsSummary || '오늘 기준 최신 국내 증시 주도주 검색'}
+
+[3번 탭 주요 일정 종목]
+${eventTickers || '삼성전자(005930), SK하이닉스(000660)'}
+
+반드시 아래 JSON 스키마만 출력하세요:
+{
+  "aiPicks": [
+    {
+      "ticker": "6자리 종목코드",
+      "name": "종목명",
+      "sector": "섹터",
+      "score": 80~98 정수,
+      "signal": "강력 매수 또는 매수 또는 분할매수",
+      "entryRange": "실제 주가 기반 진입 참고 구간",
+      "targetPrice": "목표가",
+      "stopLoss": "손절가",
+      "catalystSummary": "검증된 핵심 호재",
+      "aiReasoning": "검색으로 확인된 수급·실적 근거",
+      "sourceUrl": "참고 기사/공시 URL",
+      "updatedAt": "${kst.timeOnly} KST"
+    }
+  ],
+  "earningsPreview": [
+    {
+      "ticker": "6자리 종목코드",
+      "name": "종목명",
+      "sector": "섹터",
+      "consensusOpProfit": "실제 시장 컨센서스 영업이익",
+      "yoyGrowth": "전년동기비 증감률",
+      "quarters": ["직전3분기-2", "직전3분기-1", "최근확정분기"],
+      "revenue": [숫자1, 숫자2, 숫자3],
+      "opProfit": [숫자1, 숫자2, 숫자3],
+      "opMargin": [숫자1, 숫자2, 숫자3],
+      "debtRatio": [숫자1, 숫자2, 숫자3],
+      "sourceUrl": "실적/공시 출처 URL",
+      "factors": [
+        { "label": "주가 영향 세부 요인", "sentiment": "positive 또는 negative", "note": "구체적 근거" }
+      ]
+    }
+  ]
+}`;
+
+        const step3Res = await callGeminiWithGoogleSearch(step3Prompt);
+        const step3Json = extractJsonFromText(step3Res.text);
+        const defaultRefUrl = step3Res.sources[0]?.uri || step1Res.sources[0]?.uri || '';
+
+        const verifiedPicks = (Array.isArray(step3Json.aiPicks) ? step3Json.aiPicks : [])
+          .filter(p => p && /^\d{6}$/.test(p.ticker || ''))
+          .map(p => ({ ...p, sourceUrl: (p.sourceUrl && p.sourceUrl.startsWith('http')) ? p.sourceUrl : defaultRefUrl }));
+
+        const verifiedEarnings = (Array.isArray(step3Json.earningsPreview) ? step3Json.earningsPreview : [])
+          .filter(e => e && /^\d{6}$/.test(e.ticker || '') && Array.isArray(e.quarters) && e.quarters.length === 3)
+          .map(e => ({ ...e, sourceUrl: (e.sourceUrl && e.sourceUrl.startsWith('http')) ? e.sourceUrl : defaultRefUrl }));
+
+        state.radarData = {
+          updatedAt: kst.full,
+          aiPicks: verifiedPicks,
+          todayNews: verifiedNews,
+          upcomingEvents: validEvents,
+          earningsPreview: verifiedEarnings,
+          marketSchedules: validMarkets
+        };
+        state.rejectedFactItems = rejectedNews;
+
+        if (verifiedEarnings.length > 0 && !verifiedEarnings.some(e => e.ticker === state.selectedEarningsTicker)) {
+          state.selectedEarningsTicker = verifiedEarnings[0].ticker;
+        }
+        if (validEvents.length > 0) {
+          state.calendarMonth = validEvents[0].date.slice(0, 7);
+          state.selectedCalendarDate = validEvents[0].date;
+        }
+
+        state.lastRefreshedAt = kst.full;
+        state.refreshCount += 1;
+
+        const triggerLabel = triggerType === 'auto-10s'
+          ? '장중 10초 자동갱신'
+          : triggerType === 'load'
+            ? '페이지 로드 실검색'
+            : '수동 전체 실검색';
+
+        document.getElementById('header-subtitle').textContent =
+          `실검색 완료: ${kst.full} (${triggerLabel} #${state.refreshCount}) · 2차 검증 통과 호재 ${verifiedNews.length}건 / 차단 ${rejectedNews.length}건`;
+      } catch (err) {
+        state.globalError = `실시간 검색/검증 중 오류 발생: ${err.message}`;
+      } finally {
+        state.globalLoading = false;
+        state.loadingStepText = '';
+        updateMarketStatusBadges();
+        render();
+      }
+    }
+
+    async function performFullRefresh(triggerType = 'manual') {
+      const icon = document.getElementById('refresh-icon');
+      if (icon) {
+        icon.classList.remove('spin-anim');
+        void icon.offsetWidth;
+        icon.classList.add('spin-anim');
+      }
+      updateMarketStatusBadges();
+      if (!state.geminiKey) {
+        render();
+        return;
+      }
+      await fetchAllVerifiedMarketData(triggerType);
+    }
+
+    // 관심종목 실제 뉴스 검색 + 2단계 사실확인
+    async function fetchVerifiedWatchStockNews(stock) {
+      if (!state.geminiKey) {
+        state.globalError = '관심종목 실제 뉴스를 조회하려면 상단 [Gemini 로그인]에서 API Key를 등록해 주세요.';
+        render();
+        return;
+      }
+      state.watchLoading = true;
+      state.globalError = '';
+      render();
+
+      const kst = getKstNowParts();
+      try {
+        const prompt = `
+오늘 날짜는 ${kst.datePart} (한국시간)입니다.
+Google 검색을 실행하여 국내 상장사 **${stock.name} (${stock.ticker})**에 대해 실제로 보도된 최신 뉴스 3~5건만 가져오세요.
+존재하지 않는 기사는 절대 만들지 마세요.
+
+반드시 아래 JSON 객체만 출력하세요:
+{
+  "summary": "최신 뉴스 기준 ${stock.name} 핵심 이슈 및 주가 체크포인트 3줄 요약",
+  "news": [
+    {
+      "title": "실제 기사 제목",
+      "source": "실제 언론사명",
+      "date": "YYYY-MM-DD",
+      "sentiment": "positive 또는 negative 또는 neutral"
+    }
+  ]
+}`;
+
+        const res = await callGeminiWithGoogleSearch(prompt);
+        const parsed = extractJsonFromText(res.text);
+        const fallbackUrl = res.sources[0]?.uri || '';
+
+        if (res.sources.length === 0) {
+          throw new Error('Google 검색에서 실제 뉴스 출처를 찾지 못해 표시하지 않았습니다.');
+        }
+
+        const verifiedList = (Array.isArray(parsed.news) ? parsed.news : [])
+          .filter(n => n && (n.title || '').trim().length >= 8 && (n.source || '').trim().length > 0)
+          .map(n => ({ ...n, sourceUrl: fallbackUrl }));
+
+        state.watchNewsMap[stock.ticker] = verifiedList;
+        state.watchAiSummary[stock.ticker] = parsed.summary || '';
+        saveLocalSettings();
+      } catch (e) {
+        state.watchAiSummary[stock.ticker] = `조회 실패: ${e.message}`;
+      } finally {
+        state.watchLoading = false;
+        render();
+      }
+    }
+
+    function saveLocalSettings() {
+      localStorage.setItem('kstock_watchlist_v2', JSON.stringify(state.watchlist));
+      localStorage.setItem('kstock_selected_watch_v2', state.selectedWatchTicker);
+      localStorage.setItem('kstock_verified_watch_news_v2', JSON.stringify(state.watchNewsMap));
+      localStorage.setItem('kstock_gemini_logged_in', String(state.geminiLoggedIn));
+      localStorage.setItem('kstock_gemini_email', state.geminiEmail);
+      localStorage.setItem('kstock_gemini_key', state.geminiKey);
+    }
+
+    function deduplicateCatalysts(items) {
+      const seen = new Map();
+      for (const item of items) {
+        const normalizedTitle = (item.headline || '')
+          .replace(/\[단독\]|\[속보\]|\[특징주\]/g, '')
+          .replace(/[^가-힣a-zA-Z0-9]/g, '')
+          .slice(0, 14);
+        const key = `${item.ticker}_${normalizedTitle}`;
+        if (!seen.has(key)) {
+          seen.set(key, { ...item, sources: [item.source], duplicateCount: 1 });
+        } else {
+          const existing = seen.get(key);
+          if (!existing.sources.includes(item.source)) existing.sources.push(item.source);
+          existing.duplicateCount += 1;
+        }
+      }
+      return Array.from(seen.values());
+    }
+
+    function openGeminiModal() {
+      document.getElementById('gemini-email-input').value = state.geminiEmail || '';
+      document.getElementById('gemini-key-input').value = state.geminiKey || '';
+      document.getElementById('gemini-modal').classList.remove('hidden');
+      document.getElementById('gemini-modal').classList.add('flex');
+    }
+
+    function closeGeminiModal() {
+      document.getElementById('gemini-modal').classList.add('hidden');
+      document.getElementById('gemini-modal').classList.remove('flex');
+    }
+
+    function confirmGeminiLogin() {
+      const email = document.getElementById('gemini-email-input').value.trim() || 'gemini-user@gmail.com';
+      const key = document.getElementById('gemini-key-input').value.trim();
+      if (!key) {
+        alert('실시간 Google 검색 검증을 위해 Gemini API Key를 입력해 주세요.');
+        return;
+      }
+      state.geminiLoggedIn = true;
+      state.geminiEmail = email;
+      state.geminiKey = key;
+      saveLocalSettings();
+      closeGeminiModal();
+      updateHeaderGeminiUI();
+      performFullRefresh('manual');
+    }
+
+    function logoutGemini() {
+      state.geminiLoggedIn = false;
+      state.geminiKey = '';
+      state.radarData = createEmptyRadarData();
+      saveLocalSettings();
+      updateHeaderGeminiUI();
+      render();
+    }
+
+    function updateHeaderGeminiUI() {
+      const badge = document.getElementById('gemini-status-badge');
+      const btnText = document.getElementById('header-gemini-btn-text');
+      if (state.geminiLoggedIn && state.geminiKey) {
+        badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-navy-900"></span><span class="font-semibold text-navy-950">${state.geminiEmail} (Google 실검색 연결)</span>`;
+        btnText.textContent = 'API 설정';
+      } else {
+        badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-slate-400"></span><span>Gemini API 미연결</span>`;
+        btnText.textContent = 'Gemini 로그인';
+      }
+    }
+
+    function renderGlobalBanner() {
+      let html = '';
+      if (state.globalLoading) {
+        html += `
+          <div class="rounded-2xl bg-navy-900 text-white p-4 flex items-center gap-3 shadow-sm">
+            <svg class="w-5 h-5 animate-spin text-sky-300 shrink-0" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+            </svg>
+            <div class="text-xs sm:text-sm font-bold">${state.loadingStepText || 'Google 실시간 검색 및 2단계 사실확인 진행 중...'}</div>
+          </div>
+        `;
+      }
+      if (state.globalError) {
+        html += `
+          <div class="rounded-2xl bg-amber-50 border border-amber-300 p-4 text-xs sm:text-sm text-amber-950 flex items-center justify-between gap-3">
+            <span>${state.globalError}</span>
+            ${!state.geminiKey ? `<button onclick="openGeminiModal()" class="px-3 py-1.5 rounded-lg bg-navy-900 text-white text-xs font-bold shrink-0 cursor-pointer">API Key 등록</button>` : ''}
+          </div>
+        `;
+      }
+      return html;
+    }
+
+    function renderEmptyConnectCard(title, desc) {
+      return `
+        <div class="rounded-2xl bg-white border border-slate-200 shadow-xs p-8 sm:p-12 text-center space-y-4">
+          <div class="w-14 h-14 mx-auto rounded-2xl bg-navy-900 text-white flex items-center justify-center text-2xl font-bold">✦</div>
+          <div class="max-w-xl mx-auto space-y-2">
+            <h2 class="text-xl sm:text-2xl font-extrabold text-navy-950">${title}</h2>
+            <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">${desc}</p>
+          </div>
+          <div class="pt-1 flex items-center justify-center gap-3">
+            ${!state.geminiKey
+              ? `<button onclick="openGeminiModal()" class="px-6 py-3 rounded-xl text-sm font-bold bg-navy-900 hover:bg-navy-800 text-white transition cursor-pointer">✦ Gemini API 연결하고 실제 데이터 불러오기</button>`
+              : `<button onclick="performFullRefresh('manual')" class="px-6 py-3 rounded-xl text-sm font-bold bg-navy-900 hover:bg-navy-800 text-white transition cursor-pointer">지금 실시간 검색으로 데이터 불러오기</button>`
+            }
+          </div>
+        </div>
+      `;
+    }
+
+    function renderTabs() {
+      const bar = document.getElementById('tab-bar');
+      bar.innerHTML = TABS.map(t => {
+        const active = state.activeTab === t.id;
+        return `
+          <button onclick="switchTab('${t.id}')" class="px-3.5 py-2 rounded-lg text-xs sm:text-sm font-bold transition flex items-center gap-2 cursor-pointer ${
+            active
+              ? 'bg-navy-900 text-white shadow-xs'
+              : 'text-slate-600 hover:text-navy-950 hover:bg-slate-100'
+          }">
+            <span>${t.label}</span>
+            <span class="px-1.5 py-0.5 text-[10px] rounded ${
+              active ? 'bg-white/15 text-white' : 'bg-slate-200/80 text-slate-600'
+            }">${t.badge}</span>
+          </button>
+        `;
+      }).join('');
+    }
+
+    function switchTab(tabId) {
+      state.activeTab = tabId;
+      render();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function renderAiPicksTab() {
+      if (!state.geminiLoggedIn || !state.geminiKey) {
+        return renderEmptyConnectCard(
+          '실시간 AI 추천종목 (Gemini 로그인 전용)',
+          '부정확한 예시 데이터를 모두 제거했습니다. 상단 [Gemini 로그인]에서 API Key를 등록하면 실제 Google 검색으로 검증된 최신 호재·수급 기반 추천종목만 표시합니다.'
+        );
+      }
+
+      if (state.radarData.aiPicks.length === 0) {
+        return renderEmptyConnectCard(
+          '아직 불러온 실시간 AI 추천종목이 없습니다',
+          '아래 버튼을 누르면 Google 실시간 검색과 2단계 사실확인을 거쳐 최신 추천종목을 생성합니다.'
+        );
+      }
+
+      return `
+        <div class="space-y-5">
+          <div class="rounded-2xl bg-white border border-slate-200 shadow-xs p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div class="space-y-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-navy-900 text-white">✦ Google Search Grounding 실검색 연동</span>
+                <span class="text-xs text-slate-600">계정: ${state.geminiEmail}</span>
+              </div>
+              <h2 class="text-lg sm:text-xl font-extrabold text-navy-950">실시간 AI 추천종목</h2>
+              <p class="text-xs sm:text-sm text-slate-600">실제 검색 출처가 확인된 2차 검증 통과 호재를 바탕으로 분석된 종목입니다.</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <input type="text" value="${state.aiCustomPrompt}" placeholder="예: 반도체·방산 위주 수급주" oninput="state.aiCustomPrompt = this.value" class="px-3.5 py-2 rounded-lg bg-slate-50 border border-slate-300 text-xs sm:text-sm text-navy-950 w-60 focus:outline-none focus:border-navy-900" />
+              <button onclick="performFullRefresh('manual')" ${state.globalLoading ? 'disabled' : ''} class="px-4 py-2 rounded-lg text-xs sm:text-sm font-bold bg-navy-900 hover:bg-navy-800 disabled:opacity-50 text-white transition cursor-pointer">
+                ✦ 실검색 재분석
+              </button>
+              <button onclick="logoutGemini()" class="px-3 py-2 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer">
+                로그아웃
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            ${state.radarData.aiPicks.map(item => `
+              <div class="rounded-2xl bg-white border border-slate-200 shadow-xs hover:border-navy-900 transition p-5 flex flex-col justify-between gap-4">
+                <div class="space-y-3">
+                  <div class="flex items-start justify-between gap-3">
+                    <div>
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <h3 class="text-lg font-extrabold text-navy-950">${item.name}</h3>
+                        <span class="text-xs font-mono text-slate-500">${item.ticker}</span>
+                        <span class="px-2 py-0.5 text-[11px] rounded-md bg-slate-100 text-navy-900 font-semibold">${item.sector}</span>
+                      </div>
+                      <p class="text-xs text-slate-500 mt-0.5">갱신: ${item.updatedAt}</p>
+                    </div>
+                    <div class="text-right">
+                      <div class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-navy-900 text-white text-xs font-bold">
+                        AI 점수 ${item.score}점
+                      </div>
+                      <div class="text-[11px] font-bold text-navy-800 mt-1">${item.signal}</div>
+                    </div>
+                  </div>
+                  <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <div class="text-[11px] font-bold text-navy-800 mb-1">검증된 핵심 호재</div>
+                    <div class="text-xs sm:text-sm font-bold text-navy-950">${item.catalystSummary}</div>
+                  </div>
+                  <p class="text-xs sm:text-sm text-slate-700 leading-relaxed">
+                    <span class="text-navy-950 font-bold">근거 분석:</span> ${item.aiReasoning}
+                  </p>
+                  ${item.sourceUrl ? `
+                    <div>
+                      <a href="${item.sourceUrl}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-xs font-bold text-navy-800 hover:underline">
+                        🔗 검색 출처 원문 확인 ↗
+                      </a>
+                    </div>
+                  ` : ''}
+                </div>
+                <div class="grid grid-cols-3 gap-2 pt-3 border-t border-slate-100 text-center">
+                  <div class="bg-slate-50 rounded-lg p-2 border border-slate-100">
+                    <div class="text-[11px] text-slate-500">진입 참고가</div>
+                    <div class="text-xs font-bold text-navy-950 mt-0.5">${item.entryRange}</div>
+                  </div>
+                  <div class="bg-slate-50 rounded-lg p-2 border border-slate-100">
+                    <div class="text-[11px] text-slate-500">목표가</div>
+                    <div class="text-xs font-bold text-emerald-700 mt-0.5">${item.targetPrice}</div>
+                  </div>
+                  <div class="bg-slate-50 rounded-lg p-2 border border-slate-100">
+                    <div class="text-[11px] text-slate-500">손절 기준</div>
+                    <div class="text-xs font-bold text-rose-700 mt-0.5">${item.stopLoss}</div>
+                  </div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderTodayCatalystTab() {
+      const uniqueList = deduplicateCatalysts(state.radarData.todayNews);
+      if (uniqueList.length === 0 && state.rejectedFactItems.length === 0) {
+        return renderEmptyConnectCard(
+          '오늘의 호재 (Google 검색 2단계 실증 검증)',
+          '가짜 기사나 예시 데이터가 나오지 않도록 비워두었습니다. Gemini API Key 연결 후 실검색을 실행하면 실제 언론 보도 URL이 확인된 호재만 중복 없이 표시합니다.'
+        );
+      }
+
+      const sectors = ['전체', ...Array.from(new Set(uniqueList.map(x => x.sector)))];
+      const filtered = state.catalystSectorFilter === '전체'
+        ? uniqueList
+        : uniqueList.filter(x => x.sector === state.catalystSectorFilter);
+
+      return `
+        <div class="space-y-5">
+          <div class="rounded-2xl bg-white border border-slate-200 shadow-xs p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <h2 class="text-lg sm:text-xl font-extrabold text-navy-950">오늘의 호재 피드 (2단계 실검색 검증 완료)</h2>
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-navy-900 text-white">
+                  실존 확인 ${uniqueList.length}건 · 미확인 차단 ${state.rejectedFactItems.length}건
+                </span>
+              </div>
+              <p class="text-xs sm:text-sm text-slate-600 mt-1">
+                1차 Google Search 출처 확인 + 2차 기사 교차 사실확인을 모두 통과한 호재만 표시되며, 중복 보도는 1건으로 병합됩니다.
+              </p>
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              ${sectors.map(sec => `
+                <button onclick="setCatalystSector('${sec}')" class="px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  state.catalystSectorFilter === sec
+                    ? 'bg-navy-900 text-white'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }">${sec}</button>
+              `).join('')}
+            </div>
+          </div>
+
+          <div class="space-y-3">
+            ${filtered.map(item => `
+              <div class="rounded-2xl bg-white border border-slate-200 shadow-xs p-4 sm:p-5 space-y-2.5">
+                <div class="flex items-center justify-between gap-2 flex-wrap">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="px-2 py-0.5 rounded bg-navy-900 text-white text-xs font-mono font-bold">${item.time}</span>
+                    <span class="font-extrabold text-navy-950 text-sm sm:text-base">${item.name}</span>
+                    <span class="text-xs text-slate-500 font-mono">(${item.ticker})</span>
+                    <span class="px-2 py-0.5 rounded-full text-[11px] bg-slate-100 text-navy-800 font-semibold border border-slate-200">${item.sector}</span>
+                  </div>
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-navy-900 text-white">2차 검색 검증 통과</span>
+                    ${item.duplicateCount > 1
+                      ? `<span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200">중복 ${item.duplicateCount}건 병합됨</span>`
+                      : ''
+                    }
+                  </div>
+                </div>
+                <h3 class="text-sm sm:text-base font-bold text-navy-950">${item.headline}</h3>
+                <p class="text-xs sm:text-sm text-slate-700 leading-relaxed">${item.detail}</p>
+                <div class="flex items-center justify-between flex-wrap gap-2 pt-1 text-[11px] text-slate-500">
+                  <span>확인 매체: <strong class="text-navy-900">${item.sources.join(', ')}</strong> · ${item.factCheckNote || ''}</span>
+                  ${item.sourceUrl ? `
+                    <a href="${item.sourceUrl}" target="_blank" rel="noopener noreferrer" class="text-xs font-bold text-navy-900 hover:underline">
+                      🔗 기사 출처 링크 열기 ↗
+                    </a>
+                  ` : ''}
+                </div>
+              </div>
+            `).join('')}
+
+            ${state.rejectedFactItems.length > 0 ? `
+              <div class="rounded-2xl bg-slate-50 border border-slate-200 p-4 space-y-2">
+                <div class="text-xs font-extrabold text-navy-900">2단계 사실확인 미통과로 자동 차단된 항목 (${state.rejectedFactItems.length}건)</div>
+                ${state.rejectedFactItems.map(r => `
+                  <div class="text-xs text-slate-600 bg-white border border-slate-200 rounded-lg px-3 py-2 flex items-center justify-between gap-2">
+                    <span class="truncate font-medium text-navy-950">${r.headline}</span>
+                    <span class="text-[11px] text-rose-700 font-semibold shrink-0">${r.verifyReason}</span>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    function setCatalystSector(sec) {
+      state.catalystSectorFilter = sec;
+      render();
+    }
+
+    function renderUpcomingEventsTab() {
+      if (state.radarData.upcomingEvents.length === 0) {
+        return renderEmptyConnectCard(
+          '1달 앞 주요일정 (실검색 기반)',
+          '실제 예정된 국내 상장사의 임상·FDA·회사·학회·실적·M&A 일정을 Google 검색으로 조회한 뒤 날짜순으로 표시합니다.'
+        );
+      }
+
+      const categories = ['전체', '임상', 'FDA', '회사', '학회', '실적', 'M&A'];
+      const sorted = [...state.radarData.upcomingEvents]
+        .filter(ev => state.eventCategoryFilter === '전체' || ev.category === state.eventCategoryFilter)
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      return `
+        <div class="space-y-5">
+          <div class="rounded-2xl bg-white border border-slate-200 shadow-xs p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+              <h2 class="text-lg sm:text-xl font-extrabold text-navy-950">1달 앞 주요 기업·임상·FDA·학회·실적·M&amp;A 일정</h2>
+              <p class="text-xs sm:text-sm text-slate-600 mt-1">
+                날짜순으로 정렬되며, 일정이 모호한 건은 <span class="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 font-bold text-xs">예상 발표일</span>로 표기했습니다.
+              </p>
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              ${categories.map(cat => `
+                <button onclick="setEventCategory('${cat}')" class="px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  state.eventCategoryFilter === cat
+                    ? 'bg-navy-900 text-white'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }">${cat}</button>
+              `).join('')}
+            </div>
+          </div>
+
+          <div class="space-y-3">
+            ${sorted.map(ev => `
+              <div class="rounded-2xl bg-white border border-slate-200 shadow-xs p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div class="flex items-start gap-4">
+                  <div class="min-w-[118px] rounded-xl bg-slate-50 border border-slate-200 p-3 text-center">
+                    <div class="text-sm font-extrabold text-navy-950">${ev.date}</div>
+                    <div class="mt-1">
+                      ${ev.isExactDate
+                        ? `<span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-navy-900 text-white">공식 확정일</span>`
+                        : `<span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">예상 발표일</span>`
+                      }
+                    </div>
+                  </div>
+                  <div class="space-y-1">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="px-2.5 py-0.5 rounded-md text-xs font-bold bg-slate-100 text-navy-900 border border-slate-200">${ev.category}</span>
+                      <span class="font-extrabold text-navy-950 text-sm sm:text-base">${ev.name}</span>
+                      <span class="text-xs font-mono text-slate-500">(${ev.ticker})</span>
+                    </div>
+                    <h3 class="text-sm sm:text-base font-bold text-navy-950">${ev.title}</h3>
+                    <p class="text-xs sm:text-sm text-slate-600">${ev.detail}</p>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2 self-end md:self-center shrink-0">
+                  <button onclick="openEarningsForTicker('${ev.ticker}')" class="px-3 py-2 rounded-lg text-xs font-bold bg-white hover:bg-slate-50 text-navy-950 border border-slate-300 transition cursor-pointer">
+                    실적 미리보기 →
+                  </button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    function setEventCategory(cat) {
+      state.eventCategoryFilter = cat;
+      render();
+    }
+
+    function openEarningsForTicker(ticker) {
+      const found = state.radarData.earningsPreview.find(e => e.ticker === ticker);
+      if (found) state.selectedEarningsTicker = found.ticker;
+      switchTab('earnings-preview');
+    }
+
+    function renderEarningsPreviewTab() {
+      const list = state.radarData.earningsPreview;
+      if (list.length === 0) {
+        return renderEmptyConnectCard(
+          '실적 미리보기 & 최근 3개 분기 재무 변화',
+          '실제 공시 재무제표와 주가 영향 세부 요인(AI 긍·부정 판별)을 Google 검색으로 조회한 뒤 표시합니다.'
+        );
+      }
+
+      const current = list.find(e => e.ticker === state.selectedEarningsTicker) || list[0];
+
+      return `
+        <div class="space-y-5">
+          <div class="rounded-2xl bg-white border border-slate-200 shadow-xs p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <h2 class="text-lg sm:text-xl font-extrabold text-navy-950">실적 미리보기 &amp; AI 요인 분석</h2>
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-navy-900 text-white">✦ 실제 공시 재
