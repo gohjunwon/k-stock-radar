@@ -199,7 +199,7 @@ class Matcher:
 CATEGORIES = [
     ('기술수출', ['기술수출', '기술 수출', '기술이전', '라이선스']),
     ('수주·계약', ['공급계약', '공급 계약', '수주', '납품', '계약 체결', '계약체결', '판매계약']),
-    ('임상·허가', ['임상', '품목허가', '허가 획득', 'FDA', '승인', '식약처', '판매허가']),
+    ('임상·허가', ['임상', '품목허가', '허가 획득', 'FDA', '식약처', '판매허가']),
     ('실적', ['최대 실적', '최대실적', '어닝 서프라이즈', '어닝서프라이즈', '깜짝 실적', '흑자전환', '흑자 전환', '호실적', '실적 개선', '역대 최대']),
     ('주주환원', ['자사주', '소각', '배당 확대', '고배당', '주주환원', '무상증자']),
     ('M&A·투자', ['인수', '합병', 'M&A', '투자 유치', '지분 투자', '공장 증설', '증설']),
@@ -208,7 +208,7 @@ CATEGORIES = [
 ]
 NEGATIVE = ['급락', '하락', '약세', '철회', '해지', '취소', '소송', '적자', '불성실', '상장폐지', '거래정지', '감자', '유상증자',
             '횡령', '배임', '실패', '중단', '하한가', '반려', '경고', '우려', '손실', '리콜', '제재', '과징금', '부진', '쇼크',
-            '하향', '폭락', '압수수색', '기소', '공매도', '매도 리포트', '목표가 하향']
+            '하향', '폭락', '압수수색', '기소', '공매도', '매도 리포트', '목표가 하향', '불발', '무산', '지연', '관건', '좌초']
 
 
 def category_of(title):
@@ -251,8 +251,16 @@ def parse_time(s):
 def fetch_rss(url, press=None):
     out = []
     r = get(url)
-    root = ET.fromstring(r.content)
-    for it in root.iter('item'):
+    try:
+        items = list(ET.fromstring(r.content).iter('item'))
+    except ET.ParseError:  # 형식이 조금 깨진 RSS도 읽도록 <item> 단위로 다시 시도
+        items = []
+        for chunk in re.findall(rb'<item>.*?</item>', r.content, re.S):
+            try:
+                items.append(ET.fromstring(re.sub(rb'&(?!(amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)', b'&amp;', chunk)))
+            except ET.ParseError:
+                continue
+    for it in items:
         title = clean(it.findtext('title'))
         link = (it.findtext('link') or '').strip()
         src = it.find('source')
@@ -313,7 +321,6 @@ def gather_pool():
     """여러 출처에서 최근 기사를 모읍니다. 하나가 실패해도 나머지로 계속."""
     pool, ok = [], []
     jobs = [('네이버 주요뉴스', fetch_naver_main)]
-    jobs += [(f'네이버 {c}', (lambda c=c: fetch_naver_category(c))) for c in ('flashnews',)]
     jobs += [(name, (lambda u=u, n=name: fetch_rss(u, n))) for name, u in RSS_FEEDS]
     for q in GOOGLE_QUERIES:
         u = f'https://news.google.com/rss/search?q={requests.utils.quote(q + " when:1d")}&hl=ko&gl=KR&ceid=KR:ko'
@@ -395,7 +402,8 @@ def run_news(matcher):
     # 앞서 모은 것(24시간 이내)도 이어서 보관 — RSS는 최신 몇십 건만 주기 때문
     old = load('news.json', {}).get('catalysts', [])
     for o in old:
-        if parse_time(o.get('ts')) and parse_time(o['ts']) >= cutoff:
+        if parse_time(o.get('ts')) and parse_time(o['ts']) >= cutoff and category_of(o.get('title', '')):
+            o['category'] = category_of(o['title'])  # 규칙이 바뀌어도 다시 판정
             for l in o.get('links', []):
                 found.append({**{k: o[k] for k in ('ts', 'date', 'time', 'name', 'code', 'market', 'sector', 'category', 'title', 'desc')},
                               'press': l.get('press', ''), 'link': l['url']})
