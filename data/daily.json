@@ -1,7 +1,7 @@
 {
- "updatedAt": "2026-11-25 07:57",
- "status": "no_key",
- "error": "",
+ "updatedAt": "2026-11-26 13:16",
+ "status": "error",
+ "error": "Gemini 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/do",
  "events": [],
  "market": [],
  "picks": []
