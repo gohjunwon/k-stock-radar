@@ -2,9 +2,9 @@
 """국내주식 호재 레이더 - 자동 수집 스크립트 (GitHub Actions에서 실행)
 
   --mode news : 뉴스·관심종목만 (AI 사용 안 함, 장중 10분마다)
-  --mode full : 위 + 상장사 목록·실적 갱신 + AI(일정·시장일정·추천) 하루 1번
+  --mode full : 위 + 상장사 목록·실적 갱신 (하루 1번)
 
-AI(Gemini)는 full 모드에서만, 하루 3번 호출합니다.
+AI는 서버에서 쓰지 않습니다. AI 탭은 방문자가 각자 연결한 AI로 브라우저에서 정리합니다.
 뉴스·실적·주가는 네이버 증권과 언론사 RSS에서 가져옵니다(키 필요 없음).
 """
 import argparse
@@ -12,7 +12,6 @@ import datetime as dt
 import email.utils
 import html
 import json
-import os
 import re
 import sys
 import time
@@ -521,127 +520,6 @@ def run_earnings(matcher, codes, only_missing=False):
     log(f'[실적] {len(keep)}개 (새로 조회 {len(todo[:25])}개)')
 
 
-# ───────────── 4) AI (하루 1번) ─────────────
-MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.5-flash-lite']
-
-
-def gemini(prompt):
-    key = os.environ.get('GEMINI_API_KEY', '').strip()
-    if not key:
-        raise RuntimeError('NO_KEY')
-    last = None
-    for m in MODELS:
-        r = requests.post(f'https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent',
-                          headers={'x-goog-api-key': key, 'Content-Type': 'application/json'},
-                          json={'contents': [{'role': 'user', 'parts': [{'text': prompt}]}],
-                                'tools': [{'google_search': {}}], 'generationConfig': {'temperature': 0.2}},
-                          timeout=180)
-        if r.status_code == 404:
-            last = f'{m} 없음'
-            continue
-        if r.status_code != 200:
-            raise RuntimeError(f'Gemini {r.status_code}: {r.text[:200]}')
-        cand = (r.json().get('candidates') or [{}])[0]
-        text = ''.join(p.get('text', '') for p in (cand.get('content') or {}).get('parts', []))
-        meta = cand.get('groundingMetadata') or {}
-        chunks = [{'title': (c.get('web') or {}).get('title', '출처'), 'uri': (c.get('web') or {}).get('uri', '')} for c in meta.get('groundingChunks', [])]
-        return text, chunks, meta.get('groundingSupports', [])
-    raise RuntimeError(last or 'Gemini 모델 없음')
-
-
-def parse_json_array(text):
-    t = re.sub(r'```(json)?', '', text).strip()
-    a, b = t.find('['), t.rfind(']')
-    if a < 0 or b <= a:
-        raise ValueError('JSON 배열 없음')
-    body = t[a:b + 1]
-    try:
-        return json.loads(body)
-    except json.JSONDecodeError:
-        return json.loads(re.sub(r',\s*([\]}])', r'\1', body))
-
-
-def link_sources(item, fields, chunks, supports):
-    keys = [str(item.get(f) or '').strip()[:12] for f in fields]
-    keys = [k for k in keys if len(k) >= 2]
-    idx = []
-    for s in supports:
-        t = (s.get('segment') or {}).get('text', '')
-        if any(k in t for k in keys):
-            idx += s.get('groundingChunkIndices', [])
-    seen, out = set(), []
-    for i in idx:
-        if i < len(chunks) and chunks[i]['uri'] and chunks[i]['uri'] not in seen:
-            seen.add(chunks[i]['uri'])
-            out.append(chunks[i])
-    return out[:3]
-
-
-def run_ai(matcher, catalysts):
-    today = now().strftime('%Y-%m-%d')
-    until = (now() + dt.timedelta(days=31)).strftime('%Y-%m-%d')
-    prev = load('daily.json', {})
-    result = {'updatedAt': stamp(), 'status': 'ok', 'error': '',
-              'events': prev.get('events', []), 'market': prev.get('market', []), 'picks': prev.get('picks', [])}
-
-    def fix_code(it):
-        s = matcher.lookup(it.get('code') or '') or matcher.lookup(it.get('name') or '')
-        if s:
-            it['code'], it['name'] = s['c'], s['n']
-        else:
-            it['code'] = ''
-        return it
-
-    tasks = {
-        'events': (f"""오늘: {today} (KST)
-Google 검색으로 {today} ~ {until} 사이 예정된 국내 상장사 주요 일정 8~12건을 찾아 주세요.
-분야: 임상(결과 발표), FDA·식약처 허가, 회사(신제품·주총·상장·배당 등), 학회, 실적 발표, M&A
-검색에서 확인한 일정만 쓰고, 날짜가 확정이 아니면 "exact": false.
-설명 없이 JSON 배열만 출력:
-[{{"date":"YYYY-MM-DD","exact":true,"category":"임상|FDA|회사|학회|실적|M&A","name":"종목명","code":"6자리","title":"일정 제목","detail":"한 문장"}}]""", ['title', 'name']),
-        'market': (f"""오늘: {today} (KST)
-Google 검색으로 {today} ~ {until} 사이 국내 증시에 영향을 줄 경제지표·정세 일정 8~12건을 찾아 주세요.
-(FOMC, 미국 CPI·고용, 한국은행 금리 결정, 수출입 통계, 옵션 만기일, 주요 정상회담·선거 등). 시간은 한국시간, 모르면 빈 문자열.
-설명 없이 JSON 배열만 출력:
-[{{"date":"YYYY-MM-DD","timeKst":"HH:MM","region":"미국|한국|글로벌","title":"일정명","impact":"높음|중간","krEffect":"국내 증시 영향 한두 문장"}}]""", ['title']),
-    }
-    base = '\n'.join(f"- {c['name']}: {c['title']}" for c in catalysts[:12]) or '(없음 — 오늘 국내 증시 주도 업종을 검색해 판단)'
-    tasks['picks'] = (f"""현재: {stamp()} (KST)
-아래는 네이버·언론 RSS에서 모은 오늘의 국내 호재 뉴스입니다. Google 검색으로 사실·주가·수급을 확인해 관심 가질 만한 종목 3~5개를 골라 주세요.
-위험 요인도 꼭 적으세요. 가격을 확인 못 하면 "확인 필요".
-{base}
-설명 없이 JSON 배열만 출력:
-[{{"name":"종목명","code":"6자리","strength":"강|중|약","catalyst":"핵심 호재 한 줄","reasoning":"근거 2문장","risk":"위험 요인 한 줄","entry":"진입 참고","target":"목표가","stop":"손절 기준"}}]""", ['name', 'catalyst'])
-
-    for name, (prompt, fields) in tasks.items():
-        try:
-            text, chunks, supports = gemini(prompt)
-            items = []
-            for it in parse_json_array(text):
-                if not isinstance(it, dict):
-                    continue
-                it = fix_code(it)
-                it['links'] = link_sources(it, fields, chunks, supports)
-                items.append(it)
-            if name in ('events', 'market'):
-                items = sorted([i for i in items if re.fullmatch(r'\d{4}-\d{2}-\d{2}', str(i.get('date', ''))) and i['date'] >= today],
-                               key=lambda i: (i['date'], i.get('timeKst') or ''))
-            result[name] = items
-            log(f'[AI {name}] {len(items)}건')
-        except Exception as e:  # noqa: BLE001
-            msg = str(e)
-            result['status'] = 'no_key' if msg == 'NO_KEY' else 'error'
-            result['error'] = '' if msg == 'NO_KEY' else msg[:300]
-            log(f'[AI {name}] 건너뜀:', msg[:200])
-            if msg == 'NO_KEY':
-                break
-    # 지난 일정은 정리
-    result['events'] = [e for e in result['events'] if e.get('date', '') >= today]
-    result['market'] = [m for m in result['market'] if m.get('date', '') >= today]
-    save('daily.json', result)
-    return result
-
-
 # ───────────── 실행 ─────────────
 def main():
     ap = argparse.ArgumentParser()
@@ -655,15 +533,8 @@ def main():
     catalysts = run_news(matcher)
     run_watch(matcher)
 
-    if mode == 'full':
-        daily = run_ai(matcher, catalysts)
-    else:
-        daily = load('daily.json', {})
-
     codes = []
     for c in [*(matcher.lookup(k)['c'] for k in load_watchlist() if matcher.lookup(k)),
-              *(p.get('code') for p in daily.get('picks', [])),
-              *(e.get('code') for e in daily.get('events', []) if e.get('category') == '실적'),
               *(c['code'] for c in catalysts[:15])]:
         if c and c not in codes:
             codes.append(c)

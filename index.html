@@ -89,7 +89,7 @@ function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch
 
 const state = {
   tab: lsGet('kradar_tab', 'news'),
-  news: null, daily: null, earnings: null, watch: null, stocks: null,
+  news: null, earnings: null, watch: null, stocks: null,
   loadError: '',
   newsCat: '전체', sector: '전체', eventCat: '전체', earnIdx: 0,
   calMonth: '', calDate: '',
@@ -140,7 +140,7 @@ async function getJson(name) {
 }
 let lastSig = '';
 async function loadAll(force) {
-  const names = ['news', 'daily', 'earnings', 'watch'];
+  const names = ['news', 'earnings', 'watch'];
   const res = await Promise.allSettled(names.map(n => getJson(n + '.json')));
   const failed = [];
   res.forEach((r, i) => { if (r.status === 'fulfilled') state[names[i]] = r.value; else failed.push(names[i]); });
@@ -179,7 +179,7 @@ state.myDaily = lsGet('kradar_myai', null); // 내 AI가 정리한 결과
 state.aiRun = { busy: false, msg: '' };
 state.modal = null;
 
-function aiData() { return state.ai && state.myDaily ? state.myDaily : state.daily; }
+function aiData() { return state.ai ? state.myDaily : null; }
 function guessProvider(key) { return /^AIza/.test(key) ? 'gemini' : /^sk-ant-/.test(key) ? 'claude' : /^sk-/.test(key) ? 'openai' : ''; }
 function kstStamp() { return new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 16); }
 
@@ -358,11 +358,10 @@ function maybeAutoRun() {
 
 function aiStatusBox() {
   if (!state.ai) {
-    const shared = state.daily && (state.daily.picks?.length || state.daily.events?.length || state.daily.market?.length);
     return `
     <div class="rounded-2xl bg-blue-50 border border-blue-200 p-4 text-sm text-navy-950 leading-relaxed space-y-2">
       <div>이 탭은 <b>각자 본인의 AI</b>(Gemini·ChatGPT·Claude 중 하나)로 정리합니다. AI 키를 한 번만 넣어 두면 이 기기에서 하루 한 번 자동으로 채워집니다.
-      키는 이 기기 브라우저에만 저장되고, 다른 곳으로 보내지지 않습니다.${shared ? ` <span class="text-slate-600">(지금은 사이트 기본 결과 ${esc(state.daily.updatedAt || '')}를 보여 줍니다)</span>` : ''}</div>
+      키는 이 기기 브라우저에만 저장되고, 다른 곳으로 보내지지 않습니다.</div>
       <button onclick="openAiModal()" class="px-4 py-2 rounded-lg text-sm font-bold bg-navy-900 hover:bg-navy-800 text-white">🤖 내 AI 연결하기</button>
     </div>`;
   }
