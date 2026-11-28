@@ -233,7 +233,11 @@ STRONG_NEG = ['급락', '하한가', '상장폐지', '거래정지', '횡령', '
 WEAK_NEG = ['하락', '약세', '철회', '해지', '취소', '소송', '적자', '실패', '중단', '반려', '경고', '우려', '손실', '제재', '부진',
             '하향', '공매도', '지연', '관건']
 # 약한 악재어 바로 뒤에 오면 부정 뜻이 아님 ("하락장에도 수주", "우려 해소", "적자 축소")
-NEG_UNDO = ['에도', '져도', '어도', '아도', '해도', '는데도', '속', '불구', '딛', '뚫', '극복', '해소', '축소', '벗어', '멈', '반등', '완화', '털고', '이겨', '개선', '탈출']
+NEG_UNDO = ['에도', '져도', '어도', '아도', '해도', '는데도', '불구', '딛', '뚫', '극복', '해소', '축소', '벗어', '멈', '반등', '완화', '털고', '이겨', '개선', '탈출']
+# '우려 속 강세'의 '속'만 인정 ('적자 지속'의 '속'은 아님)
+NEG_UNDO_SOK = re.compile(r'^\S{0,2}\s*(?<![지계연후])속(?:\s|에|$)')
+# '감자칩' 같은 낱말 속 '감자'는 악재(자본 감소)가 아님
+STRONG_NEG_EXCEPT = re.compile(r'감자(?:칩|튀김|탕|빵|전분|깡|밭|농사|값)')
 SEGMENT_SPLIT = re.compile(r'\s*(?:…|\.\.\.|;| - |·{2,})\s*')  # 쉼표·'|'는 '종목, 내용' 형태라 나누지 않음
 NEAR = 30  # 종목명과 이 글자 수 안에 있어야 '근처'
 
@@ -270,7 +274,7 @@ def _weak_neg_near(title, name_pos, name_len):
         i = title.find(w)
         while i >= 0:
             tail = title[i + len(w): i + len(w) + 5]
-            undone = any(u in tail for u in NEG_UNDO) or title[max(0, i - 3):i].endswith('흑자')
+            undone = any(u in tail for u in NEG_UNDO) or bool(NEG_UNDO_SOK.match(tail)) or title[max(0, i - 3):i].endswith('흑자')
             if not undone and (name_pos is None or _near(title, name_pos, name_len, w)):
                 return True
             i = title.find(w, i + 1)
@@ -284,7 +288,8 @@ def judge(title, name=None, name_pos=None):
         p = title.find(name)
         name_pos = p if p >= 0 else None
     nlen = len(name or '')
-    if any(w in title for w in STRONG_NEG):
+    plain = STRONG_NEG_EXCEPT.sub('', title)
+    if any(w in plain for w in STRONG_NEG):
         return 'neg'
     if _weak_neg_near(title, name_pos, nlen):
         return 'neg'
@@ -411,6 +416,18 @@ def gather_pool():
         try:
             items = fn()
             pool += items
+            # 네이버·언론사 RSS가 0건이거나 가장 최근 기사가 3일 넘게 지났으면 주소가 바뀌었거나 멈춘 것 → 실패로 표시
+            stale = None
+            if not name.startswith('구글뉴스'):
+                ts = [x['t'] for x in items if x.get('t')]
+                if not items:
+                    stale = '기사 0건 (주소가 바뀌었거나 막힘)'
+                elif ts and now() - max(ts) > dt.timedelta(days=3):
+                    stale = f"최근 기사가 오래됨 ({max(ts).strftime('%m-%d %H:%M')})"
+            if stale:
+                log(f'  [출처 멈춤] {name}: {stale}')
+                report.append({'name': name, 'count': len(items), 'ok': False, 'error': stale})
+                continue
             ok.append(name)
             report.append({'name': name, 'count': len(items), 'ok': True})
         except Exception as e:  # noqa: BLE001

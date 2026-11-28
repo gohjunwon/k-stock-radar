@@ -776,8 +776,8 @@ function addWatch(ev) {
 function removeWatch(code) { state.myWatch = state.myWatch.filter(m => m.code !== code); lsSet('kradar_mywatch', state.myWatch); render(); }
 
 /* ───────── 그리기 ───────── */
-// '갱신 지연' 판단: 평일 09:00~16:30은 60분, 그 밖(주말·휴장·밤)은 4시간 넘게 수집 확인이 없으면 지연.
-// 평일 07:00 이후인데 오늘 아침 전체 갱신(06:50 예약/07:00 알람)이 없으면 그것도 지연으로 표시.
+// '갱신 지연' 판단: 평일 09:00~16:00(수집 쪽 장중 기록 주기와 같은 시간대)은 60분, 그 밖(주말·휴장·밤)은 4시간 넘게 수집 확인이 없으면 지연.
+// 평일 07:00 이후인데 오늘 아침 전체 갱신(06:10·06:50 예약)이 없으면 그것도 지연으로 표시.
 function staleInfo() {
   const st = state.status; if (!st) return null;
   const last = st.checkedAt || st.updatedAt; if (!last) return null;
@@ -785,7 +785,7 @@ function staleInfo() {
   const k = kstNow(), now = Date.now(), age = (now - toMs(last)) / 60000;
   const hm = new Date(now + 9 * 3600e3), m = hm.getUTCHours() * 60 + hm.getUTCMinutes(), wd = hm.getUTCDay();
   const weekday = wd >= 1 && wd <= 5;
-  const limit = weekday && m >= 540 && m <= 990 ? 60 : 240;
+  const limit = weekday && m >= 540 && m < 960 ? 60 : 240;
   const fails = (st.failed || []).length ? ` · 실패한 출처: ${(st.failed || []).join(', ')}` : '';
   if (age > limit) return { label: '갱신 지연', detail: `마지막 수집 확인 ${last} (${Math.round(age)}분 전)${fails}` };
   if (weekday && m >= 420 && (st.fullAt || '').slice(0, 10) !== k.date)

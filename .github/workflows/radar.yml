@@ -2,6 +2,7 @@ name: 국내주식 호재 레이더 자동 수집
 
 on:
   schedule:
+    - cron: '10 21 * * 0-4'    # 평일 06:10 KST: 전체 수집 1차 (GitHub 예약은 수십 분 늦게 시작될 때가 있어 미리 한 번)
     - cron: '50 21 * * 0-4'    # 평일 06:50 KST: 장 시작 전 전체 수집(상장사 목록·실적·뉴스) — 알람이 어긋나도 꼭 실행
     - cron: '40 22 * * 0-4'    # 평일 07:40 KST: 예비 뉴스 수집 (장 시작 1시간 전까지 한 번 더)
     # 뉴스 수집(평일 08:00~15:50은 10분마다, 그 밖에는 30분마다)은 Cloudflare 알람이 보냅니다.
@@ -38,7 +39,7 @@ jobs:
         run: |
           MODE=news
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then MODE="${{ inputs.mode }}"; fi
-          if [ "${{ github.event.schedule }}" = "50 21 * * 0-4" ]; then MODE=full; fi
+          case "${{ github.event.schedule }}" in "10 21 * * 0-4"|"50 21 * * 0-4") MODE=full ;; esac
           python scripts/collect.py --mode "$MODE"
 
       - name: 저장
