@@ -71,9 +71,25 @@ def load(name, default):
     return default
 
 
+VOLATILE = ('updatedAt', 'checked')
+
+
+def _strip(o):
+    if isinstance(o, dict):
+        return {k: _strip(v) for k, v in o.items() if k not in VOLATILE}
+    if isinstance(o, list):
+        return [_strip(v) for v in o]
+    return o
+
+
 def save(name, obj):
+    """내용이 그대로면(갱신 시각만 다르면) 파일을 다시 쓰지 않습니다 → 의미 없는 커밋 방지."""
     DATA.mkdir(exist_ok=True)
+    old = load(name, None)
+    if old is not None and _strip(old) == _strip(obj):
+        return False
     (DATA / name).write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding='utf-8')
+    return True
 
 
 def clean(text):
@@ -168,6 +184,10 @@ class Matcher:
         self.by_name = {s['n']: s for s in stocks}
 
     def find(self, title):
+        r = self.find_pos(title)
+        return r[1] if r else None
+
+    def find_pos(self, title):
         best = None
         for n, s in self.names:
             start = 0
@@ -185,7 +205,7 @@ class Matcher:
                 if best is None or i < best[0]:
                     best = (i, s)
                 break
-        return best[1] if best else None
+        return best
 
     def lookup(self, key):
         key = str(key).strip()
@@ -195,28 +215,90 @@ class Matcher:
 
 
 # ───────────── 호재 판별 (AI 없이 키워드) ─────────────
+# 분류별 (어디에 있어도 되는 확실한 표현, 종목명 바로 옆에 있을 때만 인정하는 넓은 표현)
 CATEGORIES = [
-    ('기술수출', ['기술수출', '기술 수출', '기술이전', '라이선스']),
-    ('수주·계약', ['공급계약', '공급 계약', '수주', '납품', '계약 체결', '계약체결', '판매계약']),
-    ('임상·허가', ['임상', '품목허가', '허가 획득', 'FDA', '식약처', '판매허가']),
-    ('실적', ['최대 실적', '최대실적', '어닝 서프라이즈', '어닝서프라이즈', '깜짝 실적', '흑자전환', '흑자 전환', '호실적', '실적 개선', '역대 최대']),
-    ('주주환원', ['자사주', '소각', '배당 확대', '고배당', '주주환원', '무상증자']),
-    ('M&A·투자', ['인수', '합병', 'M&A', '투자 유치', '지분 투자', '공장 증설', '증설']),
-    ('급등·특징주', ['상한가', '급등', '신고가', '특징주', '강세']),
-    ('정책·수혜', ['수혜', '정책 지원', '국책과제', '선정']),
+    ('기술수출', ['기술수출', '기술 수출', '기술이전', '라이선스 아웃', '라이선스 계약'], ['라이선스']),
+    ('수주·계약', ['공급계약', '공급 계약', '공사계약', '공사 계약', '수주', '계약 체결', '계약체결', '판매계약'], ['납품']),
+    ('임상·허가', ['임상', '품목허가', '허가 획득', 'FDA', '식약처', '판매허가'], []),
+    ('실적', ['최대 실적', '최대실적', '어닝 서프라이즈', '어닝서프라이즈', '깜짝 실적', '흑자전환', '흑자 전환', '호실적', '실적 개선', '역대 최대'], []),
+    ('주주환원', ['자사주', '소각', '배당 확대', '고배당', '주주환원', '무상증자', '특별배당', '역대급 배당', '배당 증액', '추가 환원'], []),
+    ('M&A·투자', ['M&A', '투자 유치', '지분 투자', '공장 증설'], ['인수', '합병', '증설']),
+    ('급등·특징주', ['상한가', '신고가'], ['급등', '특징주', '강세', '상승세', '%↑', '% ↑', '上', '들썩']),
+    ('정책·수혜', ['정책 지원', '국책과제'], ['수혜', '선정']),
 ]
-NEGATIVE = ['급락', '하락', '약세', '철회', '해지', '취소', '소송', '적자', '불성실', '상장폐지', '거래정지', '감자', '유상증자',
-            '횡령', '배임', '실패', '중단', '하한가', '반려', '경고', '우려', '손실', '리콜', '제재', '과징금', '부진', '쇼크',
-            '하향', '폭락', '압수수색', '기소', '공매도', '매도 리포트', '목표가 하향', '불발', '무산', '지연', '관건', '좌초']
+# 있으면 무조건 악재로 보는 강한 표현
+STRONG_NEG = ['급락', '하한가', '상장폐지', '거래정지', '횡령', '배임', '유상증자', '감자', '폭락', '압수수색', '기소', '불성실',
+              '과징금', '리콜', '쇼크', '목표가 하향', '매도 리포트', '무산', '불발', '좌초', '적자전환', '적자 전환', '계약 해지', '임상 실패']
+# 종목명 바로 근처에서 부정 뜻으로 쓰였을 때만 악재로 보는 약한 표현
+WEAK_NEG = ['하락', '약세', '철회', '해지', '취소', '소송', '적자', '실패', '중단', '반려', '경고', '우려', '손실', '제재', '부진',
+            '하향', '공매도', '지연', '관건']
+# 약한 악재어 바로 뒤에 오면 부정 뜻이 아님 ("하락장에도 수주", "우려 해소", "적자 축소")
+NEG_UNDO = ['에도', '져도', '어도', '아도', '해도', '는데도', '속', '불구', '딛', '뚫', '극복', '해소', '축소', '벗어', '멈', '반등', '완화', '털고', '이겨', '개선', '탈출']
+SEGMENT_SPLIT = re.compile(r'\s*(?:…|\.\.\.|;| - |·{2,})\s*')  # 쉼표·'|'는 '종목, 내용' 형태라 나누지 않음
+NEAR = 30  # 종목명과 이 글자 수 안에 있어야 '근처'
 
 
-def category_of(title):
-    if any(w in title for w in NEGATIVE):
-        return None
-    for cat, words in CATEGORIES:
-        if any(w in title for w in words):
+def _segments(title):
+    """제목을 구절로 나누고 (시작 위치, 구절) 목록을 돌려줍니다."""
+    out, pos = [], 0
+    for m in SEGMENT_SPLIT.finditer(title):
+        out.append((pos, title[pos:m.start()]))
+        pos = m.end()
+    out.append((pos, title[pos:]))
+    return out
+
+
+def _near(title, name_pos, name_len, word):
+    """word가 종목명과 같은 구절 안, NEAR 글자 안에 있는지."""
+    if name_pos is None:
+        return False
+    for st, seg in _segments(title):
+        if not (st <= name_pos < st + len(seg)):
+            continue
+        i = seg.find(word)
+        while i >= 0:
+            a = st + i
+            gap = a - (name_pos + name_len) if a >= name_pos else name_pos - (a + len(word))
+            if gap <= NEAR:
+                return True
+            i = seg.find(word, i + 1)
+    return False
+
+
+def _weak_neg_near(title, name_pos, name_len):
+    for w in WEAK_NEG:
+        i = title.find(w)
+        while i >= 0:
+            tail = title[i + len(w): i + len(w) + 5]
+            undone = any(u in tail for u in NEG_UNDO) or title[max(0, i - 3):i].endswith('흑자')
+            if not undone and (name_pos is None or _near(title, name_pos, name_len, w)):
+                return True
+            i = title.find(w, i + 1)
+    return False
+
+
+def judge(title, name=None, name_pos=None):
+    """'neg'(악재) / 분류 이름(호재) / None(해당 없음)."""
+    title = title or ''
+    if name and name_pos is None:
+        p = title.find(name)
+        name_pos = p if p >= 0 else None
+    nlen = len(name or '')
+    if any(w in title for w in STRONG_NEG):
+        return 'neg'
+    if _weak_neg_near(title, name_pos, nlen):
+        return 'neg'
+    for cat, strict, broad in CATEGORIES:
+        if any(w in title for w in strict):
+            return cat
+        if any(_near(title, name_pos, nlen, w) for w in broad):
             return cat
     return None
+
+
+def category_of(title, name=None, name_pos=None):
+    j = judge(title, name, name_pos)
+    return None if j in (None, 'neg') else j
 
 
 # ───────────── 뉴스 출처들 ─────────────
@@ -224,7 +306,7 @@ RSS_FEEDS = [
     ('한국경제', 'https://www.hankyung.com/feed/finance'),
     ('매일경제', 'https://www.mk.co.kr/rss/50200011/'),
     ('연합뉴스', 'https://www.yna.co.kr/rss/economy.xml'),
-    ('이데일리', 'https://www.edaily.co.kr/rss/stock.xml'),
+    ('이데일리', 'http://rss.edaily.co.kr/edaily_news.xml'),  # 옛 주소 /rss/stock.xml 은 홈페이지로 바뀜
 ]
 GOOGLE_QUERIES = ['공급계약 체결', '수주 계약', '임상 성공', '품목허가', '기술수출', '자사주 소각', '최대 실적', '흑자전환', '상한가 특징주', '신고가 특징주']
 
@@ -250,11 +332,12 @@ def parse_time(s):
 def fetch_rss(url, press=None):
     out = []
     r = get(url)
+    body = r.content.lstrip(b'\xef\xbb\xbf \r\n\t')
     try:
-        items = list(ET.fromstring(r.content).iter('item'))
+        items = list(ET.fromstring(body).iter('item'))
     except ET.ParseError:  # 형식이 조금 깨진 RSS도 읽도록 <item> 단위로 다시 시도
         items = []
-        for chunk in re.findall(rb'<item>.*?</item>', r.content, re.S):
+        for chunk in re.findall(rb'<item>.*?</item>', body, re.S):
             try:
                 items.append(ET.fromstring(re.sub(rb'&(?!(amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)', b'&amp;', chunk)))
             except ET.ParseError:
@@ -318,7 +401,7 @@ def fetch_price(code):
 
 def gather_pool():
     """여러 출처에서 최근 기사를 모읍니다. 하나가 실패해도 나머지로 계속."""
-    pool, ok = [], []
+    pool, ok, report = [], [], []
     jobs = [('네이버 주요뉴스', fetch_naver_main)]
     jobs += [(name, (lambda u=u, n=name: fetch_rss(u, n))) for name, u in RSS_FEEDS]
     for q in GOOGLE_QUERIES:
@@ -328,11 +411,13 @@ def gather_pool():
         try:
             items = fn()
             pool += items
-            ok.append(f'{name}({len(items)})')
+            ok.append(name)
+            report.append({'name': name, 'count': len(items), 'ok': True})
         except Exception as e:  # noqa: BLE001
             log(f'  [출처 실패] {name}: {e}')
-    log('[뉴스 출처]', ', '.join(ok))
-    return pool, ok
+            report.append({'name': name, 'count': 0, 'ok': False, 'error': str(e)[:160]})
+    log('[뉴스 출처]', ', '.join(f"{r['name']}({r['count']})" for r in report))
+    return pool, ok, report
 
 
 # ───────────── 같은 사건 합치기 ─────────────
@@ -381,18 +466,22 @@ def merge_catalysts(items):
 # ───────────── 1) 오늘의 호재 + 시장 주요뉴스 ─────────────
 def run_news(matcher):
     t0 = now()
-    pool, sources = gather_pool()
+    pool, sources, report = gather_pool()
+    if not pool:  # 모든 출처가 실패하면 이전 결과를 지우지 않고 그대로 둡니다
+        log('[오늘의 호재] 모든 출처 실패 — 이전 결과 유지')
+        return load('news.json', {}).get('catalysts', []), report
     cutoff = t0 - dt.timedelta(hours=24)
     found = []
     for a in pool:
         t = a['t'] or t0
         if t < cutoff or t > t0 + dt.timedelta(minutes=30):
             continue
-        cat = category_of(a['title'])
-        if not cat:
+        hit = matcher.find_pos(a['title'])
+        if not hit:
             continue
-        s = matcher.find(a['title'])
-        if not s:
+        pos, s = hit
+        cat = category_of(a['title'], s['n'], pos)
+        if not cat:
             continue
         found.append({'ts': t.isoformat(), 'date': t.strftime('%Y-%m-%d'), 'time': t.strftime('%H:%M'),
                       'name': s['n'], 'code': s['c'], 'market': s.get('m', ''), 'sector': s.get('s', '') or '기타',
@@ -401,8 +490,8 @@ def run_news(matcher):
     # 앞서 모은 것(24시간 이내)도 이어서 보관 — RSS는 최신 몇십 건만 주기 때문
     old = load('news.json', {}).get('catalysts', [])
     for o in old:
-        if parse_time(o.get('ts')) and parse_time(o['ts']) >= cutoff and category_of(o.get('title', '')):
-            o['category'] = category_of(o['title'])  # 규칙이 바뀌어도 다시 판정
+        if parse_time(o.get('ts')) and parse_time(o['ts']) >= cutoff and category_of(o.get('title', ''), o.get('name')):
+            o['category'] = category_of(o['title'], o.get('name'))  # 규칙이 바뀌어도 다시 판정
             for l in o.get('links', []):
                 found.append({**{k: o[k] for k in ('ts', 'date', 'time', 'name', 'code', 'market', 'sector', 'category', 'title', 'desc')},
                               'press': l.get('press', ''), 'link': l['url']})
@@ -421,12 +510,13 @@ def run_news(matcher):
 
     save('news.json', {'updatedAt': stamp(), 'sources': sources, 'catalysts': catalysts, 'headlines': headlines})
     log(f'[오늘의 호재] {len(catalysts)}건 / 시장 뉴스 {len(headlines)}건')
-    return catalysts
+    return catalysts, report
 
 
 # ───────────── 2) 관심종목 ─────────────
 def run_watch(matcher):
     cfg = load_watchlist()
+    prev = {w.get('code'): w for w in load('watch.json', {}).get('stocks', [])}
     out = []
     for key in cfg:
         s = matcher.lookup(key)
@@ -437,7 +527,11 @@ def run_watch(matcher):
             items = fetch_stock_news(s['c'], 20)
         except Exception as e:  # noqa: BLE001
             log('  [관심종목] 뉴스 실패', s['n'], e)
-            items = []
+            items = None
+        if items is None:  # 실패하면 이전에 받아 둔 뉴스·가격을 그대로 유지
+            if s['c'] in prev:
+                out.append(prev[s['c']])
+            continue
         week = now() - dt.timedelta(days=7)
         news, seen = [], set()
         for a in items:
@@ -445,11 +539,12 @@ def run_watch(matcher):
             if k in seen or (a['t'] and a['t'] < week):
                 continue
             seen.add(k)
-            cat = category_of(a['title'])
-            neg = any(w in a['title'] for w in NEGATIVE)
+            j = judge(a['title'], s['n'])
+            cat, neg = (j if j != 'neg' else None), j == 'neg'
             news.append({'time': a['t'].strftime('%m-%d %H:%M') if a['t'] else '', 'title': a['title'], 'press': a['press'],
                          'link': a['link'], 'desc': a['desc'], 'tone': 'positive' if cat else ('negative' if neg else 'neutral')})
-        out.append({'name': s['n'], 'code': s['c'], 'sector': s.get('s', ''), **fetch_price(s['c']), 'news': news[:12]})
+        price = fetch_price(s['c']) or {k: v for k, v in prev.get(s['c'], {}).items() if k in ('price', 'ratio', 'market')}
+        out.append({'name': s['n'], 'code': s['c'], 'sector': s.get('s', ''), **price, 'news': news[:12]})
         time.sleep(0.3)
     save('watch.json', {'updatedAt': stamp(), 'stocks': out})
     log(f'[관심종목] {len(out)}개')
@@ -530,7 +625,7 @@ def main():
     stocks = get_stocks(refresh=(mode == 'full'))
     matcher = Matcher(stocks)
 
-    catalysts = run_news(matcher)
+    catalysts, report = run_news(matcher)
     run_watch(matcher)
 
     codes = []
@@ -540,8 +635,30 @@ def main():
             codes.append(c)
     run_earnings(matcher, codes, only_missing=(mode == 'news'))
 
-    save('status.json', {'updatedAt': stamp(), 'mode': mode})
+    write_status(mode, report)
     log('== 완료 ==')
+
+
+def in_market_window(t):
+    """평일 08:00~16:00 KST (10분마다 수집하는 시간대)."""
+    return t.weekday() < 5 and 8 * 60 <= t.hour * 60 + t.minute < 16 * 60
+
+
+def write_status(mode, report):
+    """수집 확인 기록. 실패 출처가 바뀌었거나, 마지막 기록이 오래됐을 때만 다시 씁니다
+    (장중 30분 · 그 밖 3시간) — 사이트의 '갱신 지연' 판단과 출처별 건수 표시에 씁니다."""
+    t = now()
+    failed = sorted(r['name'] for r in report if not r['ok'])
+    old = load('status.json', {})
+    last = parse_time((old.get('checkedAt') or '').replace(' ', 'T') + ':00+09:00') if old.get('checkedAt') else None
+    beat = dt.timedelta(minutes=30) if in_market_window(t) else dt.timedelta(hours=3)
+    if last and old.get('failed') == failed and old.get('mode') == mode and t - last < beat:
+        return
+    (DATA / 'status.json').write_text(json.dumps({
+        'checkedAt': stamp(), 'updatedAt': stamp(), 'mode': mode, 'failed': failed,
+        'fullAt': stamp() if mode == 'full' else old.get('fullAt', ''),  # 아침 전체 갱신(장 시작 전) 확인용
+        'sources': report, 'newsUpdatedAt': load('news.json', {}).get('updatedAt', ''),
+    }, ensure_ascii=False, indent=1), encoding='utf-8')
 
 
 if __name__ == '__main__':
