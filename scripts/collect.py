@@ -274,11 +274,41 @@ def _weak_neg_near(title, name_pos, name_len):
         i = title.find(w)
         while i >= 0:
             tail = title[i + len(w): i + len(w) + 5]
-            undone = any(u in tail for u in NEG_UNDO) or bool(NEG_UNDO_SOK.match(tail)) or title[max(0, i - 3):i].endswith('흑자')
+            undone = any(u in tail for u in NEG_UNDO) or bool(NEG_UNDO_SOK.match(tail)) or title[max(0, i - 3):i].endswith('흑자') \
+                or _reversed_after(title, i, w) or _is_reversal_word(title, i, w)
             if not undone and (name_pos is None or _near(title, name_pos, name_len, w)):
                 return True
             i = title.find(w, i + 1)
     return False
+
+
+# 악재어 바로 뒤(10자 안)에 오면 악재가 뒤집힌 것 ("유상증자 철회", "소송 리스크 해소", "급락에도 자사주 소각")
+REVERSE = ['철회', '취소', '해소', '불식', '종료', '탈피', '벗어나', '벗어', '딛고', '에도', '불구', '해제']
+REVERSE_WIN = 10
+
+
+def _reversed_after(text, i, w):
+    tail = text[i + len(w): i + len(w) + REVERSE_WIN]
+    return any(r in tail for r in REVERSE)
+
+
+def _strong_neg(text):
+    """뒤집히지 않은 강한 악재어가 하나라도 있으면 True."""
+    for w in STRONG_NEG:
+        i = text.find(w)
+        while i >= 0:
+            if not _reversed_after(text, i, w):
+                return True
+            i = text.find(w, i + 1)
+    return False
+
+
+def _is_reversal_word(title, i, w):
+    """'철회·취소' 등이 앞(10자 안)의 다른 악재어를 뒤집는 말로 쓰였는지."""
+    if w not in REVERSE:
+        return False
+    head = title[max(0, i - REVERSE_WIN):i]
+    return any(n in head for n in STRONG_NEG + WEAK_NEG if n != w)
 
 
 def judge(title, name=None, name_pos=None):
@@ -289,7 +319,7 @@ def judge(title, name=None, name_pos=None):
         name_pos = p if p >= 0 else None
     nlen = len(name or '')
     plain = STRONG_NEG_EXCEPT.sub('', title)
-    if any(w in plain for w in STRONG_NEG):
+    if _strong_neg(plain):
         return 'neg'
     if _weak_neg_near(title, name_pos, nlen):
         return 'neg'
